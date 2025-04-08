@@ -8,9 +8,22 @@ pipeline {
             }
         }
 
+        stage('Install PHP') {
+            steps {
+                sh '''
+                    if ! command -v php >/dev/null 2>&1; then
+                        echo "PHP not found, installing..."
+                        sudo apt update
+                        sudo apt install -y php
+                    else
+                        echo "PHP already installed: $(php -v)"
+                    fi
+                '''
+            }
+        }
+
         stage('Run PHP File') {
             steps {
-                // Run the PHP script to check if it throws any error
                 sh 'php index.php'
             }
         }
