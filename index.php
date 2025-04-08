@@ -1,3 +1,3 @@
 <?php
-echo "Hello Sivakumar";\
-jhgfdsdfghjkl
+echo "Hello Sivakumar";
+?>
