@@ -1,3 +1,5 @@
 <?php
-echo "Hello, Sivakumar! Jenkins PHP Build Test Successful 🚀";
-?>
+
+echo "This will cause an error
+
+// Missing closing quote and semicolon
