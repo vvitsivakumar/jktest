@@ -4,7 +4,14 @@ pipeline {
     stages {
         stage('Git Checkout') {
             steps {
-                git branch:'main', changelog: false, credentialsId: '0f8e4388-ff6d-470a-b970-d4545d194333', poll: false, url: 'https://github.com/vvitsivakumar/jktest.git'
+                git branch: 'main', changelog: false, credentialsId: '0f8e4388-ff6d-470a-b970-d4545d194333', poll: false, url: 'https://github.com/vvitsivakumar/jktest.git'
+            }
+        }
+
+        stage('Run PHP File') {
+            steps {
+                // Run the PHP script to check if it throws any error
+                sh 'php index.php'
             }
         }
     }
