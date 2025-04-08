@@ -13,8 +13,8 @@ pipeline {
                 sh '''
                     if ! command -v php >/dev/null 2>&1; then
                         echo "PHP not found, installing..."
-                        sudo apt update
-                        sudo apt install -y php
+                        apt update
+                        apt install -y php
                     else
                         echo "PHP already installed: $(php -v)"
                     fi
