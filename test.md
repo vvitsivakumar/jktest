@@ -1,93 +1,155 @@
-# Complete macOS VPN Auto-Connection Setup
+# Complete macOS VPN Auto-Connection Setup & Removal Guide
 
-This guide is for macOS only. All files are ready to copy-paste.
+**IMPORTANT:** Follow these steps EXACTLY in order. Do not skip steps.
 
 ---
 
-## PART 1: COMPLETE REMOVAL (If Already Installed)
+## PART 1: COMPLETE REMOVAL (Start Fresh)
+
+If you already have this system installed, remove it completely first.
+
+### Removal Step 1: Disable the Watchdog (MUST DO FIRST)
 
 ```bash
-# Stop watchdog first
-sudo launchctl bootout system /Library/LaunchDaemons/com.autovpn.watchdog.plist 2>/dev/null || true
+sudo launchctl bootout system /Library/LaunchDaemons/com.autovpn.watchdog.plist
 sleep 3
+```
 
-# Stop daemon
-sudo launchctl bootout system /Library/LaunchDaemons/com.autovpn.daemon.plist 2>/dev/null || true
+### Removal Step 2: Disable the Daemon
+
+```bash
+sudo launchctl bootout system /Library/LaunchDaemons/com.autovpn.daemon.plist
 sleep 3
+```
 
-# Kill all processes
+### Removal Step 3: Kill All OpenVPN Processes
+
+```bash
 sudo pkill -9 -f "openvpn --config"
 sudo pkill -9 -f autovpn
 sleep 2
+```
 
-# Remove immutable flags
-sudo chflags -R nouchg /Library/LaunchDaemons/com.autovpn.* 2>/dev/null || true
+### Removal Step 4: Remove Immutable Flags (CRITICAL)
+
+```bash
+# Remove immutable flag from ALL protected files
+sudo chflags -R nouchg /Library/LaunchDaemons/com.autovpn.daemon.plist 2>/dev/null || true
+sudo chflags -R nouchg /Library/LaunchDaemons/com.autovpn.watchdog.plist 2>/dev/null || true
 sudo chflags -R nouchg /Users/vpn/vpntest/mac.sh 2>/dev/null || true
 sudo chflags -R nouchg /usr/local/bin/autovpn-watchdog.sh 2>/dev/null || true
 sudo chflags -R nouchg /var/local/autovpn-backup 2>/dev/null || true
-sleep 2
 
-# Delete all files
+sleep 2
+```
+
+### Removal Step 5: Delete All Files
+
+```bash
+# Delete LaunchDaemon plists
 sudo rm -f /Library/LaunchDaemons/com.autovpn.daemon.plist
 sudo rm -f /Library/LaunchDaemons/com.autovpn.watchdog.plist
+
+# Delete scripts
 sudo rm -f /Users/vpn/vpntest/mac.sh
 sudo rm -f /usr/local/bin/autovpn-watchdog.sh
-sudo rm -rf /var/local/autovpn-backup
-sudo rm -f /var/log/autovpn-*.out
-sudo rm -f /var/log/autovpn-*.err
 
-echo "✅ Complete removal done"
+# Delete backup directory
+sudo rm -rf /var/local/autovpn-backup
+
+# Delete log files
+sudo rm -f /var/log/autovpn-daemon.out
+sudo rm -f /var/log/autovpn-daemon.err
+sudo rm -f /var/log/autovpn-watchdog.out
+sudo rm -f /var/log/autovpn-watchdog.err
+sudo rm -f /var/log/openvpn-*.log
 ```
+
+### Removal Step 6: Verify Complete Removal
+
+```bash
+echo "Checking if files exist..."
+ls /Library/LaunchDaemons/com.autovpn* 2>&1
+ls /Users/vpn/vpntest/mac.sh 2>&1
+ls /usr/local/bin/autovpn-watchdog.sh 2>&1
+
+echo "Checking if processes running..."
+ps aux | grep -E "openvpn|autovpn"
+```
+
+**Expected output:** "No such file or directory" for all files and no running processes.
 
 ---
 
 ## PART 2: FRESH SETUP
 
-### Step 1: Install OpenVPN
+### Setup Step 1: Install Required Tools
 
 ```bash
+# Install Homebrew (if not already installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install OpenVPN
 brew install openvpn
+
+# Verify installation
 openvpn --version
+which openvpn
 ```
 
-### Step 2: Create Directories
+### Setup Step 2: Prepare Your VPN Configuration Files
+
+Before proceeding, you need three OpenVPN configuration files:
 
 ```bash
+# Create the VPN directory
 mkdir -p /Users/vpn/vpntest
-sudo mkdir -p /var/local/autovpn-backup
-sudo chown root:wheel /var/local/autovpn-backup
-sudo chmod 700 /var/local/autovpn-backup
+cd /Users/vpn/vpntest
 ```
 
-### Step 3: Place Your VPN Config Files
+**Place your OpenVPN files here:**
+- `BLR.ovpn` - First VPN config
+- `DHA.ovpn` - Second VPN config  
+- `JK.ovpn` - Third VPN config
 
-Copy your three `.ovpn` files to `/Users/vpn/vpntest/`:
-- `BLR.ovpn`
-- `DHA.ovpn`
-- `JK.ovpn`
+**To get these files:**
+1. Download from your VPN provider
+2. Or use existing configs you have
+3. Save them to `/Users/vpn/vpntest/` directory
 
-Verify:
+**Verify they exist:**
 ```bash
 ls -la /Users/vpn/vpntest/*.ovpn
 ```
 
----
+You should see three `.ovpn` files listed.
 
-## FILE 1: Main VPN Script - mac.sh
+### Setup Step 3: Create Required Directories
 
-Create file: `/Users/vpn/vpntest/mac.sh`
+```bash
+# Create backup directory
+sudo mkdir -p /var/local/autovpn-backup
+sudo chown root:wheel /var/local/autovpn-backup
+sudo chmod 700 /var/local/autovpn-backup
+
+# Verify
+ls -la /var/local/autovpn-backup
+```
+
+### Setup Step 4: Create the Main VPN Script
+
+Create file `/Users/vpn/vpntest/mac.sh`:
 
 ```bash
 sudo nano /Users/vpn/vpntest/mac.sh
 ```
 
-Copy and paste all content below, then press `Ctrl+X`, `Y`, `Enter`:
+Copy and paste the entire content below:
 
 ```bash
 #!/opt/homebrew/bin/bash
-# VPN Auto-Connection Script for macOS
-
-set -euo pipefail
+# This script is intended to be run to establish a secure VPN connection.
+# It will try a list of VPNs in order. If all fail, it will disconnect the internet to prevent leaks.
 
 # --- VPN configs and expected public IPs ---
 VPNS_IN_ORDER=(
@@ -96,191 +158,134 @@ VPNS_IN_ORDER=(
     "JK"  "/Users/vpn/vpntest/JK.ovpn"  "192.168.1.3"
 )
 
-# --- Webhook URL (Base64 encoded for Google Chat) ---
+# --- Webhook URL (Base64 encoded) ---
 WEBHOOK_URL_BASE64="aHR0cHM6Ly9jaGF0Lmdvb2dsZWFwaXMuY29tL3YxL3NwYWNlcy9BQVFBNmJrWWxtUS9tZXNzYWdlcz9rZXk9QUl6YVN5RGRJMGhDWnRFNnZ5U2pNbS1XRWZScTNDUHpxS3Fxc0hJJnRva2VuPVNGcXU2UTkzN0JFRnFoOVUtdWt5Y2EtN0xDTGZjQllJWHZ5Uk9td2ZmY0U="
 WEBHOOK_URL="$(echo "$WEBHOOK_URL_BASE64" | base64 --decode | tr -d '\n\r')"
 
-# --- Logging ---
-LOGFILE="/var/log/autovpn-daemon.out"
-
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE"
-}
-
-# --- Chat Notification Function ---
+# --- Functions ---
 send_chat_message() {
     local MESSAGE="$1"
     curl -s -X POST -H 'Content-Type: application/json' \
-        -d "{\"text\": \"$MESSAGE\"}" "$WEBHOOK_URL" >/dev/null 2>&1 || true
+        -d "{\"text\": \"$MESSAGE\"}" "$WEBHOOK_URL" >/dev/null 2>&1
 }
 
-# --- Desktop Notification ---
 send_desktop_notification() {
     local MESSAGE="$1"
     osascript -e "display notification \"$MESSAGE\" with title \"VPN Auto Connect\""
 }
 
-# --- Check Public IP ---
 check_public_ip() {
     local EXPECTED_IP="$1"
     local ACTUAL_IP
-    ACTUAL_IP=$(curl -4 -s --max-time 10 https://ifconfig.me/ip 2>/dev/null || echo "")
+    ACTUAL_IP=$(curl -4 -s --max-time 10 https://ifconfig.me/ip || echo "")
     [[ "$ACTUAL_IP" == "$EXPECTED_IP" ]]
 }
 
-# --- Kill OpenVPN ---
 kill_vpn() {
     sudo pkill -f "openvpn --config" || true
 }
 
-# --- Get System Info ---
-get_system_info() {
-    HOSTNAME=$(hostname)
-    USERNAME=$(whoami)
-    TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-    OS_INFO="$(sw_vers -productName) $(sw_vers -productVersion)"
-    
-    # Network info
-    PRIMARY_IFACE=$(route get default 2>/dev/null | awk '/interface: / {print $2}' || echo "unknown")
-    LOCAL_IP=$(ipconfig getifaddr "$PRIMARY_IFACE" 2>/dev/null || echo "Unknown")
-    
-    # Determine connection type
-    CONN_TYPE_INFO=""
-    if networksetup -getairportnetwork "$PRIMARY_IFACE" 2>/dev/null | grep -q "Current Wi-Fi Network"; then
-        SSID=$(networksetup -getairportnetwork "$PRIMARY_IFACE" 2>/dev/null | awk -F': ' '{print $2}' || echo "Unknown")
-        CONN_TYPE_INFO="📶 Wi-Fi: $SSID"
-    else
-        CONN_TYPE_INFO="📶 Ethernet"
-    fi
-}
-
-# --- Disconnect Internet (Emergency) ---
 disconnect_internet() {
     local PRIMARY_IFACE
     PRIMARY_IFACE=$(route get default 2>/dev/null | awk '/interface: / {print $2}')
     if [ -n "$PRIMARY_IFACE" ]; then
-        log "Disconnecting internet interface: $PRIMARY_IFACE"
+        echo "Disconnecting primary interface: $PRIMARY_IFACE"
         sudo ifconfig "$PRIMARY_IFACE" down
+    else
+        echo "Could not determine primary interface to disconnect."
     fi
 }
 
-# --- MAIN LOGIC ---
-log "===== VPN Auto-Connection Starting ====="
-get_system_info
+# --- Get system info ---
+HOSTNAME=$(hostname)
+USERNAME=$(who | awk 'NR==1{print $1}')
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+OS_INFO="$(sw_vers -productName) $(sw_vers -productVersion)"
 
-log "Hostname: $HOSTNAME | User: $USERNAME | OS: $OS_INFO"
-log "Local IP: $LOCAL_IP | Interface: $PRIMARY_IFACE"
+# --- Detect primary interface IP ---
+PRIMARY_IFACE=$(route get default 2>/dev/null | awk '/interface: / {print $2}')
+LOCAL_IP=$(ipconfig getifaddr "$PRIMARY_IFACE" 2>/dev/null || echo "Unknown")
 
-# Kill any existing OpenVPN
+# --- Determine connection type (Wi-Fi or Ethernet) ---
+CONN_TYPE_INFO=""
+if networksetup -getairportnetwork "$PRIMARY_IFACE" | grep -q "Current Wi-Fi Network"; then
+    SSID=$(networksetup -getairportnetwork "$PRIMARY_IFACE" | awk -F': ' '{print $2}')
+    [ -n "$SSID" ] && CONN_TYPE_INFO="📶 Type: WiFi: $SSID\n"
+elif networksetup -getmedia "$PRIMARY_IFACE" | grep -q "Media:.*Ethernet"; then
+    CONN_TYPE_INFO="📶 Type: Ethernet\n"
+fi
+
+# --- Clean up before starting ---
 kill_vpn
-sleep 2
 
-# Try each VPN in order
+# --- Try VPNs in the specified order ---
 VPN_CONNECTED=0
-
 for ((i=0; i<${#VPNS_IN_ORDER[@]}; i+=3)); do
     VPN_NAME="${VPNS_IN_ORDER[i]}"
     CONFIG="${VPNS_IN_ORDER[i+1]}"
     EXPECTED_IP="${VPNS_IN_ORDER[i+2]}"
-    
-    log "Attempting to connect to $VPN_NAME..."
-    send_desktop_notification "Connecting to $VPN_NAME..."
-    
-    # Start OpenVPN
+    echo "$(date): Connecting $CONFIG ..."
+
     sudo /opt/homebrew/opt/openvpn/sbin/openvpn --config "$CONFIG" --daemon
     sleep 8
-    
-    # Check public IP
-    ACTUAL_IP=$(curl -4 -s --max-time 10 https://ifconfig.me/ip 2>/dev/null || echo "")
-    log "Detected Public IP: $ACTUAL_IP (Expected: $EXPECTED_IP)"
-    
+
+    ACTUAL_IP=$(curl -4 -s --max-time 10 https://ifconfig.me/ip || echo "")
+    echo "$(date): Detected Public IP: $ACTUAL_IP"
+
     if check_public_ip "$EXPECTED_IP"; then
         VPN_CONNECTED=1
-        log "✅ Successfully connected to $VPN_NAME"
-        send_desktop_notification "✅ Connected to $VPN_NAME"
-        
-        # Send success notification
-        MESSAGE="✅ *VPN Connection Successful*
-👤 User: *$USERNAME*
-💻 Host: $HOSTNAME
-📱 OS: $OS_INFO
-🕐 $TIMESTAMP
-
-📡 *Network Details*
-📌 Interface: $PRIMARY_IFACE
-$CONN_TYPE_INFO
-🌐 Local IP: $LOCAL_IP
-🌍 Public IP: $ACTUAL_IP
-
-🔒 *VPN Status*
-✅ Connected to *$VPN_NAME*
-Expected IP: $EXPECTED_IP"
-        
-        send_chat_message "$MESSAGE"
+        echo "$(date): Successfully connected to $VPN_NAME."
+        send_desktop_notification "Successfully connected to $VPN_NAME."
+        send_chat_message "ℹ️ *System Info*\n👤 User: *$USERNAME*\n💻 Host: $HOSTNAME\n📱 OS: $OS_INFO\n🕐 $TIMESTAMP\n\n📡 *Network Details*\n📌 Interface: $PRIMARY_IFACE\n${CONN_TYPE_INFO}🌐 Local IP: $LOCAL_IP\n🌍 Public IP: $ACTUAL_IP\n\n🔒 *VPN Status*\n✅ Connected to *$VPN_NAME*\nExpected IP: $EXPECTED_IP"
         break
     else
-        log "❌ Failed to connect to $VPN_NAME"
+        echo "$(date): Failed to connect to $VPN_NAME. Trying next..."
         kill_vpn
-        sleep 2
     fi
 done
 
-# If all VPNs failed
 if [ "$VPN_CONNECTED" -eq 0 ]; then
-    log "❌ All VPNs failed to connect!"
-    send_desktop_notification "⚠️ All VPNs failed! Disconnecting internet..."
-    
-    MESSAGE="❌ *VPN Connection Failed - Internet Disconnected*
-👤 User: *$USERNAME*
-💻 Host: $HOSTNAME
-📱 OS: $OS_INFO
-🕐 $TIMESTAMP
-
-📡 *Network Details*
-📌 Interface: $PRIMARY_IFACE
-$CONN_TYPE_INFO
-🌐 Local IP: $LOCAL_IP
-🌍 Public IP: Unable to connect
-
-🔒 *VPN Status*
-❌ All VPNs failed to connect
-⚠️ Internet has been disconnected to prevent IP leaks"
-    
-    send_chat_message "$MESSAGE"
+    echo "$(date):  All VPNs failed!"
+    send_desktop_notification "All VPNs failed. Disconnecting internet!"
+    send_chat_message "ℹ️ *System info*\n👤 User: *$USERNAME*\n💻 Host: $HOSTNAME\n📱 OS: $OS_INFO\n🌐 VPN Connection Failed\n🕐 $TIMESTAMP\n\n📡 Network Details:\n📌 Interface: $PRIMARY_IFACE\n${CONN_TYPE_INFO}🌐 Local IP: $LOCAL_IP\n🌍 Public IP: $ACTUAL_IP ⚠️\n\n🔒 VPN Status:\n❌ All VPNs failed to connect. Disconnecting internet..."
     disconnect_internet
 fi
-
-log "===== VPN Auto-Connection Complete ====="
 ```
 
-Set permissions:
+Press `Ctrl+X`, then `Y`, then `Enter` to save.
+
+### Setup Step 5: Set Permissions on VPN Script
+
 ```bash
 sudo chown root:wheel /Users/vpn/vpntest/mac.sh
 sudo chmod 700 /Users/vpn/vpntest/mac.sh
 sudo chflags uchg /Users/vpn/vpntest/mac.sh
+
+# Verify
 ls -lo /Users/vpn/vpntest/mac.sh
 ```
 
----
+Should show: `-rwx------@ 1 root wheel` with `uchg` flag.
 
-## FILE 2: Watchdog Script - autovpn-watchdog.sh
+### Setup Step 6: Create the Watchdog Script
 
-Create file: `/usr/local/bin/autovpn-watchdog.sh`
+Create file `/usr/local/bin/autovpn-watchdog.sh`:
 
 ```bash
 sudo nano /usr/local/bin/autovpn-watchdog.sh
 ```
 
-Copy and paste all content below, then press `Ctrl+X`, `Y`, `Enter`:
+Copy and paste the entire content below:
 
 ```bash
 #!/bin/bash
-# Enhanced Watchdog for VPN Auto-Connection
-# Monitors and protects VPN system from tampering
+#
+# /usr/local/bin/autovpn-watchdog.sh
+# MacOS watchdog for auto-vpn daemon + script
 
 set -euo pipefail
 
-# --- Configuration ---
+# --- CONFIG ---
 TARGET_SCRIPT="/Users/vpn/vpntest/mac.sh"
 DAEMON_PLIST="/Library/LaunchDaemons/com.autovpn.daemon.plist"
 DAEMON_LABEL="system/com.autovpn.daemon"
@@ -300,11 +305,7 @@ EXPECTED_PLIST_MODE="644"
 
 SLEEP_INTERVAL=5
 
-# --- Utility Functions ---
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a /var/log/autovpn-watchdog.out
-}
-
+log() { echo "[$(date '+%F %T')] $*"; }
 send_alert() {
     local MSG="$1"
     curl -s -X POST -H 'Content-Type: application/json' \
@@ -314,8 +315,8 @@ send_alert() {
 ensure_backup_dir() {
     if [ ! -d "$BACKUP_DIR" ]; then
         mkdir -p "$BACKUP_DIR"
-        sudo chown root:wheel "$BACKUP_DIR"
-        sudo chmod 700 "$BACKUP_DIR"
+        chown root:wheel "$BACKUP_DIR"
+        chmod 700 "$BACKUP_DIR"
     fi
 }
 
@@ -323,14 +324,14 @@ backup_files_if_needed() {
     ensure_backup_dir
     if [ -f "$TARGET_SCRIPT" ] && [ ! -f "$SCRIPT_BKP" ]; then
         cp -p "$TARGET_SCRIPT" "$SCRIPT_BKP"
-        sudo chown root:wheel "$SCRIPT_BKP"
-        sudo chmod 600 "$SCRIPT_BKP"
+        chown root:wheel "$SCRIPT_BKP"
+        chmod 600 "$SCRIPT_BKP"
         log "Created script backup: $SCRIPT_BKP"
     fi
     if [ -f "$DAEMON_PLIST" ] && [ ! -f "$PLIST_BKP" ]; then
         cp -p "$DAEMON_PLIST" "$PLIST_BKP"
-        sudo chown root:wheel "$PLIST_BKP"
-        sudo chmod 600 "$PLIST_BKP"
+        chown root:wheel "$PLIST_BKP"
+        chmod 600 "$PLIST_BKP"
         log "Created plist backup: $PLIST_BKP"
     fi
 }
@@ -338,22 +339,15 @@ backup_files_if_needed() {
 restore_script_if_missing() {
     if [ ! -f "$TARGET_SCRIPT" ]; then
         if [ -f "$SCRIPT_BKP" ]; then
-            sudo cp "$SCRIPT_BKP" "$TARGET_SCRIPT"
-            sudo chown root:wheel "$TARGET_SCRIPT"
-            sudo chmod "$EXPECTED_SCRIPT_MODE" "$TARGET_SCRIPT"
-            sudo chflags uchg "$TARGET_SCRIPT" 2>/dev/null || true
-            log "🚨 Restored $TARGET_SCRIPT from backup (WAS DELETED!)"
-            send_alert "🚨 CRITICAL: VPN script was deleted and restored!
-📝 File: mac.sh
-⏰ $(date '+%Y-%m-%d %H:%M:%S')
-🖥️ Host: $(hostname)
-🛡️ Watchdog automatically restored it"
+            cp "$SCRIPT_BKP" "$TARGET_SCRIPT"
+            chown root:wheel "$TARGET_SCRIPT"
+            chmod "$EXPECTED_SCRIPT_MODE" "$TARGET_SCRIPT"
+            chflags uchg "$TARGET_SCRIPT" 2>/dev/null || true
+            log "Restored $TARGET_SCRIPT from backup"
+            send_alert "🚨 Restored VPN script on $(hostname): $TARGET_SCRIPT (deleted)"
         else
-            log "ERROR: $TARGET_SCRIPT missing and no backup available"
-            send_alert "❌ CRITICAL: VPN script missing with NO BACKUP!
-📝 File: mac.sh
-⏰ $(date '+%Y-%m-%d %H:%M:%S')
-🖥️ Host: $(hostname)"
+            log "ERROR: $TARGET_SCRIPT missing and no backup"
+            send_alert "❌ CRITICAL: $TARGET_SCRIPT missing on $(hostname)"
         fi
     fi
 }
@@ -361,69 +355,54 @@ restore_script_if_missing() {
 restore_plist_if_missing() {
     if [ ! -f "$DAEMON_PLIST" ]; then
         if [ -f "$PLIST_BKP" ]; then
-            sudo cp "$PLIST_BKP" "$DAEMON_PLIST"
-            sudo chown root:wheel "$DAEMON_PLIST"
-            sudo chmod "$EXPECTED_PLIST_MODE" "$DAEMON_PLIST"
-            sudo chflags uchg "$DAEMON_PLIST" 2>/dev/null || true
-            log "🚨 Restored $DAEMON_PLIST from backup (WAS DELETED!)"
-            send_alert "🚨 CRITICAL: LaunchDaemon plist was deleted and restored!
-📝 File: com.autovpn.daemon.plist
-⏰ $(date '+%Y-%m-%d %H:%M:%S')
-🖥️ Host: $(hostname)
-🛡️ Watchdog automatically restored and reloaded it"
-            sudo launchctl bootstrap system "$DAEMON_PLIST" 2>/dev/null || true
-            sudo launchctl kickstart -k "$DAEMON_LABEL" 2>/dev/null || true
+            cp "$PLIST_BKP" "$DAEMON_PLIST"
+            chown root:wheel "$DAEMON_PLIST"
+            chmod "$EXPECTED_PLIST_MODE" "$DAEMON_PLIST"
+            chflags uchg "$DAEMON_PLIST" 2>/dev/null || true
+            log "Restored $DAEMON_PLIST from backup"
+            send_alert "🚨 Restored LaunchDaemon on $(hostname): $DAEMON_PLIST (deleted)"
+            launchctl bootstrap system "$DAEMON_PLIST" 2>/dev/null || true
+            launchctl kickstart -k "$DAEMON_LABEL" 2>/dev/null || true
         else
             log "ERROR: $DAEMON_PLIST missing and no backup"
-            send_alert "❌ CRITICAL: Daemon plist missing with NO BACKUP!
-📝 File: com.autovpn.daemon.plist
-⏰ $(date '+%Y-%m-%d %H:%M:%S')
-🖥️ Host: $(hostname)"
+            send_alert "❌ CRITICAL: $DAEMON_PLIST missing on $(hostname)"
         fi
     fi
 }
 
 ensure_ownership_and_mode() {
     if [ -f "$TARGET_SCRIPT" ]; then
-        CURRENT_OWNER=$(stat -f '%Su:%Sg' "$TARGET_SCRIPT" 2>/dev/null || echo "unknown:unknown")
-        CURRENT_MODE=$(stat -f '%A' "$TARGET_SCRIPT" 2>/dev/null || echo "unknown")
-        
-        if [ "$CURRENT_OWNER" != "$EXPECTED_SCRIPT_OWNER" ]; then
-            sudo chown root:wheel "$TARGET_SCRIPT" 2>/dev/null || true
-            log "⚠️ Fixed owner of $TARGET_SCRIPT (was: $CURRENT_OWNER)"
-            send_alert "⚠️ Permission Alert: Script owner changed!
-📝 File: mac.sh
-👤 Changed to: $CURRENT_OWNER
-✅ Restored to: root:wheel"
+        cur_owner="$(stat -f '%Su:%Sg' "$TARGET_SCRIPT")"
+        cur_mode_num="$(stat -f '%Lp' "$TARGET_SCRIPT")"
+
+        if [ "$cur_owner" != "${EXPECTED_SCRIPT_OWNER/:/ }" ] && [ "$cur_owner" != "$EXPECTED_SCRIPT_OWNER" ]; then
+            chown root:wheel "$TARGET_SCRIPT" 2>/dev/null || true
+            log "Fixed owner of $TARGET_SCRIPT"
         fi
-        
-        if [ "$CURRENT_MODE" != "$EXPECTED_SCRIPT_MODE" ]; then
-            sudo chmod "$EXPECTED_SCRIPT_MODE" "$TARGET_SCRIPT" 2>/dev/null || true
-            log "⚠️ Fixed mode of $TARGET_SCRIPT (was: $CURRENT_MODE)"
-            send_alert "⚠️ Permission Alert: Script permissions changed!
-📝 File: mac.sh
-🔒 Changed to: $CURRENT_MODE
-✅ Restored to: $EXPECTED_SCRIPT_MODE"
+
+        if [ "$cur_mode_num" != "$EXPECTED_SCRIPT_MODE" ]; then
+            chmod "$EXPECTED_SCRIPT_MODE" "$TARGET_SCRIPT" 2>/dev/null || true
+            log "Fixed mode of $TARGET_SCRIPT"
         fi
-        
-        sudo chflags uchg "$TARGET_SCRIPT" 2>/dev/null || true
+
+        chflags uchg "$TARGET_SCRIPT" 2>/dev/null || true
     fi
-    
+
     if [ -f "$DAEMON_PLIST" ]; then
-        CURRENT_OWNER_P=$(stat -f '%Su:%Sg' "$DAEMON_PLIST" 2>/dev/null || echo "unknown:unknown")
-        CURRENT_MODE_P=$(stat -f '%A' "$DAEMON_PLIST" 2>/dev/null || echo "unknown")
-        
-        if [ "$CURRENT_OWNER_P" != "$EXPECTED_PLIST_OWNER" ]; then
-            sudo chown root:wheel "$DAEMON_PLIST" 2>/dev/null || true
-            log "⚠️ Fixed owner of $DAEMON_PLIST (was: $CURRENT_OWNER_P)"
+        cur_owner_p="$(stat -f '%Su:%Sg' "$DAEMON_PLIST")"
+        cur_mode_p_num="$(stat -f '%Lp' "$DAEMON_PLIST")"
+
+        if [ "$cur_owner_p" != "${EXPECTED_PLIST_OWNER/:/ }" ] && [ "$cur_owner_p" != "$EXPECTED_PLIST_OWNER" ]; then
+            chown root:wheel "$DAEMON_PLIST" 2>/dev/null || true
+            log "Fixed owner of $DAEMON_PLIST"
         fi
-        
-        if [ "$CURRENT_MODE_P" != "$EXPECTED_PLIST_MODE" ]; then
-            sudo chmod "$EXPECTED_PLIST_MODE" "$DAEMON_PLIST" 2>/dev/null || true
-            log "⚠️ Fixed mode of $DAEMON_PLIST (was: $CURRENT_MODE_P)"
+
+        if [ "$cur_mode_p_num" != "$EXPECTED_PLIST_MODE" ]; then
+            chmod "$EXPECTED_PLIST_MODE" "$DAEMON_PLIST" 2>/dev/null || true
+            log "Fixed mode of $DAEMON_PLIST"
         fi
-        
-        sudo chflags uchg "$DAEMON_PLIST" 2>/dev/null || true
+
+        chflags uchg "$DAEMON_PLIST" 2>/dev/null || true
     fi
 }
 
@@ -434,29 +413,24 @@ is_openvpn_running() {
 
 restart_vpn_daemon_if_needed() {
     if ! is_openvpn_running; then
-        log "🔄 OpenVPN process not running - restarting daemon"
-        send_alert "🔄 OpenVPN Process Alert
-⏰ $(date '+%Y-%m-%d %H:%M:%S')
-🖥️ Host: $(hostname)
-ℹ️ OpenVPN process died unexpectedly
-🔧 Watchdog is restarting the daemon..."
-        sudo launchctl kickstart -k "$DAEMON_LABEL" 2>/dev/null || true
+        log "OpenVPN not found - restarting daemon"
+        send_alert "🔁 OpenVPN process missing on $(hostname) - watchdog restarting"
+        launchctl kickstart -k "$DAEMON_LABEL" 2>/dev/null || true
         sleep 2
     fi
 }
 
 ensure_watchdog_is_loaded() {
     if [ -f "$WATCHDOG_PLIST" ]; then
-        sudo chown root:wheel "$WATCHDOG_PLIST" 2>/dev/null || true
-        sudo chmod 644 "$WATCHDOG_PLIST" 2>/dev/null || true
-        sudo chflags uchg "$WATCHDOG_PLIST" 2>/dev/null || true
+        chown root:wheel "$WATCHDOG_PLIST" 2>/dev/null || true
+        chmod 644 "$WATCHDOG_PLIST" 2>/dev/null || true
+        chflags uchg "$WATCHDOG_PLIST" 2>/dev/null || true
     fi
 }
 
 mainloop() {
-    log "🛡️ Watchdog starting: monitoring $TARGET_SCRIPT and $DAEMON_PLIST"
+    log "Watchdog starting: monitoring $TARGET_SCRIPT and $DAEMON_PLIST"
     backup_files_if_needed
-    
     while true; do
         restore_script_if_missing
         restore_plist_if_missing
@@ -467,34 +441,38 @@ mainloop() {
     done
 }
 
-# --- Check if running as root ---
 if [ "$EUID" -ne 0 ]; then
-    log "ERROR: This script must be run as root"
+    log "This script must be run as root"
     exit 1
 fi
 
 mainloop
 ```
 
-Set permissions:
+Press `Ctrl+X`, then `Y`, then `Enter` to save.
+
+### Setup Step 7: Set Permissions on Watchdog Script
+
 ```bash
 sudo chown root:wheel /usr/local/bin/autovpn-watchdog.sh
 sudo chmod 700 /usr/local/bin/autovpn-watchdog.sh
 sudo chflags uchg /usr/local/bin/autovpn-watchdog.sh
+
+# Verify
 ls -lo /usr/local/bin/autovpn-watchdog.sh
 ```
 
----
+Should show: `-rwx------@ 1 root wheel` with `uchg` flag.
 
-## FILE 3: Daemon LaunchPlist
+### Setup Step 8: Create Daemon LaunchPlist
 
-Create file: `/Library/LaunchDaemons/com.autovpn.daemon.plist`
+Create file `/Library/LaunchDaemons/com.autovpn.daemon.plist`:
 
 ```bash
 sudo nano /Library/LaunchDaemons/com.autovpn.daemon.plist
 ```
 
-Copy and paste, then `Ctrl+X`, `Y`, `Enter`:
+Copy and paste:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -531,24 +509,17 @@ Copy and paste, then `Ctrl+X`, `Y`, `Enter`:
 </plist>
 ```
 
-Set permissions:
-```bash
-sudo chown root:wheel /Library/LaunchDaemons/com.autovpn.daemon.plist
-sudo chmod 644 /Library/LaunchDaemons/com.autovpn.daemon.plist
-sudo chflags uchg /Library/LaunchDaemons/com.autovpn.daemon.plist
-```
+Press `Ctrl+X`, then `Y`, then `Enter` to save.
 
----
+### Setup Step 9: Create Watchdog LaunchPlist
 
-## FILE 4: Watchdog LaunchPlist
-
-Create file: `/Library/LaunchDaemons/com.autovpn.watchdog.plist`
+Create file `/Library/LaunchDaemons/com.autovpn.watchdog.plist`:
 
 ```bash
 sudo nano /Library/LaunchDaemons/com.autovpn.watchdog.plist
 ```
 
-Copy and paste, then `Ctrl+X`, `Y`, `Enter`:
+Copy and paste:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -585,16 +556,26 @@ Copy and paste, then `Ctrl+X`, `Y`, `Enter`:
 </plist>
 ```
 
-Set permissions:
+Press `Ctrl+X`, then `Y`, then `Enter` to save.
+
+### Setup Step 10: Set Permissions on Plist Files
+
 ```bash
+sudo chown root:wheel /Library/LaunchDaemons/com.autovpn.daemon.plist
+sudo chmod 644 /Library/LaunchDaemons/com.autovpn.daemon.plist
+sudo chflags uchg /Library/LaunchDaemons/com.autovpn.daemon.plist
+
 sudo chown root:wheel /Library/LaunchDaemons/com.autovpn.watchdog.plist
 sudo chmod 644 /Library/LaunchDaemons/com.autovpn.watchdog.plist
 sudo chflags uchg /Library/LaunchDaemons/com.autovpn.watchdog.plist
+
+# Verify
+ls -lo /Library/LaunchDaemons/com.autovpn*.plist
 ```
 
----
+Both should show: `-rw-r--r--@ 1 root wheel` with `uchg` flag.
 
-## FINAL SETUP: Load Everything
+### Setup Step 11: Load the Daemons
 
 ```bash
 # Load both daemons
@@ -607,78 +588,97 @@ sleep 5
 sudo launchctl list | grep autovpn
 ```
 
-Should show:
-```
-com.autovpn.daemon
-com.autovpn.watchdog
-```
+Should show both `com.autovpn.daemon` and `com.autovpn.watchdog` in the list.
 
-### Verify Everything is Working
+### Setup Step 12: Verify Everything is Running
 
 ```bash
 # Check running processes
 ps aux | grep -E "openvpn|autovpn" | grep -v grep
 
-# Check daemon logs
+# Check daemon logs (should show VPN connection attempts)
 tail -20 /var/log/autovpn-daemon.out
-tail -20 /var/log/autovpn-daemon.err
 
-# Check watchdog logs
+# Check watchdog logs (should show it's monitoring)
 tail -20 /var/log/autovpn-watchdog.out
-tail -20 /var/log/autovpn-watchdog.err
 ```
 
 ---
 
-## COMPLETE REMOVAL
+## COMPLETE REMOVAL (When Ready to Remove)
 
-When you want to remove everything:
+When you want to completely remove this system:
+
+### Removal Step 1: Disable Watchdog First
 
 ```bash
-# Stop both daemons
-sudo launchctl bootout system /Library/LaunchDaemons/com.autovpn.watchdog.plist 2>/dev/null || true
-sudo launchctl bootout system /Library/LaunchDaemons/com.autovpn.daemon.plist 2>/dev/null || true
+sudo launchctl bootout system /Library/LaunchDaemons/com.autovpn.watchdog.plist
 sleep 3
+```
 
-# Kill processes
+### Removal Step 2: Disable Daemon
+
+```bash
+sudo launchctl bootout system /Library/LaunchDaemons/com.autovpn.daemon.plist
+sleep 3
+```
+
+### Removal Step 3: Kill All Processes
+
+```bash
 sudo pkill -9 -f "openvpn --config"
 sudo pkill -9 -f autovpn
 sleep 2
+```
 
-# Remove immutable flags
-sudo chflags -R nouchg /Library/LaunchDaemons/com.autovpn.* 2>/dev/null || true
+### Removal Step 4: Remove Immutable Flags
+
+```bash
+sudo chflags -R nouchg /Library/LaunchDaemons/com.autovpn.daemon.plist 2>/dev/null || true
+sudo chflags -R nouchg /Library/LaunchDaemons/com.autovpn.watchdog.plist 2>/dev/null || true
 sudo chflags -R nouchg /Users/vpn/vpntest/mac.sh 2>/dev/null || true
 sudo chflags -R nouchg /usr/local/bin/autovpn-watchdog.sh 2>/dev/null || true
 sudo chflags -R nouchg /var/local/autovpn-backup 2>/dev/null || true
 sleep 2
+```
 
-# Delete everything
+### Removal Step 5: Delete Everything
+
+```bash
 sudo rm -f /Library/LaunchDaemons/com.autovpn.daemon.plist
 sudo rm -f /Library/LaunchDaemons/com.autovpn.watchdog.plist
 sudo rm -f /Users/vpn/vpntest/mac.sh
 sudo rm -f /usr/local/bin/autovpn-watchdog.sh
 sudo rm -rf /var/local/autovpn-backup
-sudo rm -f /var/log/autovpn-*.out
-sudo rm -f /var/log/autovpn-*.err
-
-# Verify
-ls /Library/LaunchDaemons/com.autovpn* 2>&1
-ps aux | grep autovpn
-
-echo "✅ Complete removal done"
+sudo rm -f /var/log/autovpn-daemon.out
+sudo rm -f /var/log/autovpn-daemon.err
+sudo rm -f /var/log/autovpn-watchdog.out
+sudo rm -f /var/log/autovpn-watchdog.err
 ```
+
+### Removal Step 6: Verify Removal
+
+```bash
+echo "=== Checking LaunchDaemons ==="
+ls /Library/LaunchDaemons/com.autovpn* 2>&1
+
+echo "=== Checking Scripts ==="
+ls /Users/vpn/vpntest/mac.sh 2>&1
+ls /usr/local/bin/autovpn-watchdog.sh 2>&1
+
+echo "=== Checking Processes ==="
+ps aux | grep -E "openvpn|autovpn" | grep -v grep
+```
+
+All should show "No such file or directory" and no running processes.
 
 ---
 
-## Notification Features
+## SUMMARY
 
-The system sends Google Chat notifications for:
+**Setup takes:** ~10-15 minutes
+**Requirements:** Admin/sudo access, Homebrew, OpenVPN, 3 .ovpn config files
+**Key files created:** 5 files total
+**Removal takes:** ~5 minutes (if following steps in order)
 
-✅ **Successful VPN Connection** - System info + VPN name + Public IP
-❌ **All VPNs Failed** - Alert with public IP and disconnect action
-🚨 **File Deleted** - Watchdog restores and notifies
-⚠️ **Permission Changed** - Watchdog fixes and notifies
-🔄 **Process Died** - Watchdog restarts and notifies
-⏰ **System Info** - Hostname, user, OS, timestamp included
-
-All notifications include: User, Host, OS, Timestamp, Network Details, VPN Status
+**If OpenVPN won't connect**, check your `.ovpn` files are correct and contain proper credentials.
